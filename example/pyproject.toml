@@ -8,18 +8,18 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "^2.31"
-my-build-tools = { path = "vendor/my_build_tools.whl" }
-my-ui-elements = { path = "vendor/my_ui_elements.whl" }
+six = { path = "vendor/six.whl" }
+colorama = { path = "vendor/colorama.whl" }
 
 [tool.vendor]
 vendor-dir = "vendor"
 
 [tool.vendor.server]
-internal = "https://internal-pypi.company.local/simple/"
+testpypi = "https://test.pypi.org/simple/"
 
-[tool.vendor.packages.internal]
-my-build-tools = "^1.0.0"
-my-ui-elements = ">=2.0.0,<3.0.0"
+[tool.vendor.packages.testpypi]
+six = "^1.16.0"
+colorama = "^0.4.6"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

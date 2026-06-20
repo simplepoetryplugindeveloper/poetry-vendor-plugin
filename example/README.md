@@ -1,19 +1,18 @@
 # Poetry Vendor Plugin — Example Project
 
-This directory contains a minimal example project that shows how to use `poetry-vendor-plugin` to vendor internal packages from a private PyPI server.
+This directory contains a minimal example project that shows how to use `poetry-vendor-plugin` to vendor packages from a private PyPI server.
+
+To make the example runnable without setting up your own index, it uses the public **TestPyPI** server (`https://test.pypi.org/simple/`) and two small real packages: `six` and `colorama`.
 
 ## What it demonstrates
 
-- Configuring one or more private PyPI servers under `[tool.vendor.server]`.
+- Configuring one or more PyPI servers under `[tool.vendor.server]`.
 - Declaring which packages come from which server under `[tool.vendor.packages.<server>]`.
 - Using stable, version-less path dependencies in `[tool.poetry.dependencies]`.
 
 ## Prerequisites
 
 - Poetry 2.0+
-- Access to the private PyPI server(s) configured in `pyproject.toml`.
-
-> The server URL in this example (`https://internal-pypi.company.local/simple/`) is a placeholder. Replace it with your real index URL before running the commands.
 
 ## Setup
 
@@ -43,12 +42,12 @@ From this directory:
 poetry vendor pull
 ```
 
-This downloads wheels into `vendor/` and creates `vendor.lock`:
+This downloads wheels from TestPyPI into `vendor/` and creates `vendor.lock`:
 
 ```
 vendor/
-├── my_build_tools.whl
-├── my_ui_elements.whl
+├── six.whl
+├── colorama.whl
 └── vendor.lock
 ```
 
@@ -70,6 +69,19 @@ poetry vendor list
 
 # Update vendored packages to their latest allowed versions
 poetry vendor update
+```
+
+## Adapting to a private PyPI server
+
+Replace the TestPyPI URL in `pyproject.toml` with your internal index and swap `six`/`colorama` for your own internal packages:
+
+```toml
+[tool.vendor.server]
+internal = "https://internal-pypi.company.local/simple/"
+
+[tool.vendor.packages.internal]
+my-build-tools = "^1.0.0"
+my-ui-elements = ">=2.0.0,<3.0.0"
 ```
 
 ## Committing vendored packages
