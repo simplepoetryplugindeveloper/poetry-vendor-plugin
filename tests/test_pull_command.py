@@ -149,14 +149,47 @@ def test_pull_no_config_returns_error(
     mock_run.assert_not_called()
 
 
-def test_pull_invalid_package_config(
+def test_pull_deprecated_config_returns_error(
     fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
 ) -> None:
     fake_poetry.file.read.return_value = {
         "tool": {
             "poetry-vendor": {
                 "vendor-dir": str(vendor_dir),
-                "packages": [{"name": "my-build-tools"}],  # missing source
+                "packages": [
+                    {
+                        "name": "my-build-tools",
+                        "source": "https://example.com/simple/",
+                        "version": "^1.0.0",
+                    }
+                ],
+            }
+        }
+    }
+    command = _build_command(fake_poetry, make_command_io)
+
+    with patch("poetry_vendor_plugin.commands.subprocess.run") as mock_run:
+        result = command.handle()
+
+    assert result == 1
+    mock_run.assert_not_called()
+
+
+def test_pull_invalid_package_config(
+    fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
+) -> None:
+    fake_poetry.file.read.return_value = {
+        "tool": {
+            "vendor": {
+                "vendor-dir": str(vendor_dir),
+                "server": {
+                    "internal": "https://example.com/simple/",
+                },
+                "packages": {
+                    "unknown-server": {  # server not defined in [tool.vendor.server]
+                        "my-build-tools": "^1.0.0",
+                    }
+                },
             }
         }
     }

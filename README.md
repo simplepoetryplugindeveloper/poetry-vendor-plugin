@@ -26,18 +26,15 @@ poetry self add poetry-vendor-plugin
 Add to your project's `pyproject.toml`:
 
 ```toml
-[tool.poetry-vendor]
+[tool.vendor]
 vendor-dir = "vendor"
 
-[[tool.poetry-vendor.packages]]
-name = "my-build-tools"
-source = "https://internal-pypi.company.local/simple/"
-version = "^1.0.0"
+[tool.vendor.server]
+internal = "https://internal-pypi.company.local/simple/"
 
-[[tool.poetry-vendor.packages]]
-name = "my-ui-elements"
-source = "https://internal-pypi.company.local/simple/"
-version = ">=2.0.0,<3.0.0"
+[tool.vendor.packages.internal]
+my-build-tools = "^1.0.0"
+my-ui-elements = ">=2.0.0,<3.0.0"
 ```
 
 ### 2. Pull vendor packages
@@ -95,13 +92,28 @@ poetry vendor update -p my-build-tools  # Update specific package
 ## Configuration Reference
 
 ```toml
-[tool.poetry-vendor]
+[tool.vendor]
 vendor-dir = "vendor"  # Directory for vendored wheels (default: "vendor")
 
-[[tool.poetry-vendor.packages]]
-name = "package-name"     # Package name on PyPI
-source = "https://..."    # Private PyPI index URL
-version = "^1.0.0"        # Version specifier (any PEP 440 specifier)
+[tool.vendor.server]
+server1 = "https://..."  # Named private PyPI index URL
+
+[tool.vendor.packages.server1]
+package-name = "^1.0.0"  # Package name and PEP 440 version specifier
+```
+
+You can define multiple servers and group packages under the server they come from:
+
+```toml
+[tool.vendor.server]
+internal = "https://internal-pypi.company.local/simple/"
+legacy = "https://legacy-pypi.company.local/simple/"
+
+[tool.vendor.packages.internal]
+my-build-tools = "^1.0.0"
+
+[tool.vendor.packages.legacy]
+old-ui-elements = ">=1.0.0,<2.0.0"
 ```
 
 ## Lock File

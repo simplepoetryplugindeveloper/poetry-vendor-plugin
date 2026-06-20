@@ -24,15 +24,16 @@ def fake_poetry(vendor_dir: Path) -> MagicMock:
     poetry: Any = MagicMock()
     poetry.file.read.return_value = {
         "tool": {
-            "poetry-vendor": {
+            "vendor": {
                 "vendor-dir": str(vendor_dir),
-                "packages": [
-                    {
-                        "name": "my-build-tools",
-                        "source": "https://example.com/simple/",
-                        "version": "^1.0.0",
+                "server": {
+                    "internal": "https://example.com/simple/",
+                },
+                "packages": {
+                    "internal": {
+                        "my-build-tools": "^1.0.0",
                     }
-                ],
+                },
             }
         }
     }

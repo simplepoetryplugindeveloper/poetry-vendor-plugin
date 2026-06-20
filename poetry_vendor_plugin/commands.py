@@ -98,16 +98,24 @@ class VendorPullCommand(Command):
         poetry = self.poetry
         vendor_config = self._get_vendor_config(poetry)
 
+        if vendor_config is None:
+            return 1
+
         if not vendor_config:
             self.line_error(
-                "<error>No [tool.poetry-vendor] configuration found in pyproject.toml</error>"
+                "<error>No [tool.vendor] configuration found in pyproject.toml</error>"
             )
             return 1
 
         vendor_dir = Path(vendor_config.get("vendor-dir", "vendor"))
         vendor_dir.mkdir(exist_ok=True)
 
-        packages = vendor_config.get("packages", [])
+        try:
+            packages = self._expand_packages(vendor_config)
+        except ValueError as e:
+            self.line_error(f"<error>{e}</error>")
+            return 1
+
         if not packages:
             self.line("<comment>No vendor packages configured.</comment>")
             return 0
@@ -239,10 +247,68 @@ class VendorPullCommand(Command):
 
         return 0 if fail_count == 0 else 1
 
-    def _get_vendor_config(self, poetry: Any) -> dict[str, Any]:
+    def _get_vendor_config(self, poetry: Any) -> dict[str, Any] | None:
         """Read vendor configuration from pyproject.toml."""
         pyproject = poetry.file.read()
-        return pyproject.get("tool", {}).get("poetry-vendor", {})
+        tool = pyproject.get("tool", {})
+
+        if "poetry-vendor" in tool:
+            self.line_error(
+                "<error>Detected deprecated [tool.poetry-vendor] configuration.</error>"
+            )
+            self.line_error("Please migrate to the new [tool.vendor] format:")
+            self.line_error("")
+            self.line_error("  [tool.vendor]")
+            self.line_error('  vendor-dir = "vendor"')
+            self.line_error("")
+            self.line_error("  [tool.vendor.server]")
+            self.line_error('  server1 = "https://internal-pypi.example.com/simple/"')
+            self.line_error("")
+            self.line_error("  [tool.vendor.packages.server1]")
+            self.line_error('  my-package = "^1.0.0"')
+            self.line_error("")
+            return None
+
+        return tool.get("vendor", {})
+
+    def _expand_packages(self, vendor_config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Expand [tool.vendor.server] and [tool.vendor.packages.*] into a package list."""
+        servers = vendor_config.get("server", {})
+        packages_by_server = vendor_config.get("packages", {})
+        expanded: list[dict[str, Any]] = []
+
+        if not isinstance(servers, dict):
+            raise ValueError("[tool.vendor.server] must be a table of server URLs")
+
+        if not isinstance(packages_by_server, dict):
+            raise ValueError(
+                "[tool.vendor.packages] must be a table of per-server package tables"
+            )
+
+        for server_name, server_packages in packages_by_server.items():
+            source = servers.get(server_name)
+            if source is None:
+                raise ValueError(
+                    f"Unknown server '{server_name}' referenced in "
+                    f"[tool.vendor.packages.{server_name}]"
+                )
+
+            if not isinstance(server_packages, dict):
+                raise ValueError(
+                    f"[tool.vendor.packages.{server_name}] must be a table mapping "
+                    "package names to version specifiers"
+                )
+
+            for pkg_name, version in server_packages.items():
+                expanded.append(
+                    {
+                        "name": pkg_name,
+                        "source": source,
+                        "version": str(version),
+                    }
+                )
+
+        return expanded
 
 
 class VendorUpdateCommand(Command):
@@ -270,9 +336,11 @@ class VendorListCommand(Command):
 
     def handle(self) -> int:
         poetry = self.poetry
-        vendor_config = (
-            poetry.file.read().get("tool", {}).get("poetry-vendor", {})
-        )
+        vendor_config = self._get_vendor_config(poetry)
+
+        if vendor_config is None:
+            return 1
+
         vendor_dir = Path(vendor_config.get("vendor-dir", "vendor"))
 
         if not vendor_dir.exists():
@@ -325,3 +393,17 @@ class VendorListCommand(Command):
             self.line(f"  <info>•</info> {wheel.name} <comment>({size_str})</comment>")
 
         return 0
+
+    def _get_vendor_config(self, poetry: Any) -> dict[str, Any] | None:
+        """Read vendor configuration from pyproject.toml."""
+        pyproject = poetry.file.read()
+        tool = pyproject.get("tool", {})
+
+        if "poetry-vendor" in tool:
+            self.line_error(
+                "<error>Detected deprecated [tool.poetry-vendor] configuration.</error>"
+            )
+            self.line_error("Please migrate to the new [tool.vendor] format.")
+            return None
+
+        return tool.get("vendor", {})
