@@ -15,8 +15,16 @@ This plugin adds `poetry vendor pull` — a command that downloads your configur
 
 ## Installation
 
+Poetry plugins are installed into Poetry's own environment:
+
 ```bash
 poetry self add poetry-vendor-plugin
+```
+
+Verify the plugin is loaded:
+
+```bash
+poetry self show plugins
 ```
 
 ## Example

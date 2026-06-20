@@ -11,30 +11,39 @@ This directory contains a minimal example project that shows how to use `poetry-
 ## Prerequisites
 
 - Poetry 2.0+
-- The plugin installed in Poetry:
-  ```bash
-  poetry self add poetry-vendor-plugin
-  ```
 - Access to the private PyPI server(s) configured in `pyproject.toml`.
 
 > The server URL in this example (`https://internal-pypi.company.local/simple/`) is a placeholder. Replace it with your real index URL before running the commands.
 
-## Usage
+## Setup
+
+### 1. Install the plugin
+
+Poetry plugins must be installed in Poetry's own environment:
+
+```bash
+# Install from PyPI
+poetry self add poetry-vendor-plugin
+
+# Or install from the local source when developing this plugin
+poetry self add ../
+```
+
+Verify it is loaded:
+
+```bash
+poetry self show plugins
+```
+
+### 2. Vendor the packages
 
 From this directory:
 
 ```bash
-# Download vendor packages into vendor/ and create vendor.lock
 poetry vendor pull
-
-# List vendored packages with resolved versions
-poetry vendor list
-
-# Update vendored packages to their latest allowed versions
-poetry vendor update
 ```
 
-After running `poetry vendor pull`, the `vendor/` directory will contain:
+This downloads wheels into `vendor/` and creates `vendor.lock`:
 
 ```
 vendor/
@@ -44,6 +53,24 @@ vendor/
 ```
 
 The wheel files use stable, version-less names, so the path dependencies in `pyproject.toml` do not need to change when versions are updated.
+
+### 3. Install the project
+
+Run this **after** vendoring, otherwise the path dependencies will fail because the wheels do not exist yet:
+
+```bash
+poetry install
+```
+
+### 4. Inspect or update vendored packages
+
+```bash
+# List vendored packages with resolved versions
+poetry vendor list
+
+# Update vendored packages to their latest allowed versions
+poetry vendor update
+```
 
 ## Committing vendored packages
 
