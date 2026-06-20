@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "poetry-vendor-plugin-example"
+version = "0.1.0"
+description = "Example project showing poetry-vendor-plugin usage"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31"
+my-build-tools = { path = "vendor/my_build_tools.whl" }
+my-ui-elements = { path = "vendor/my_ui_elements.whl" }
+
+[tool.vendor]
+vendor-dir = "vendor"
+
+[tool.vendor.server]
+internal = "https://internal-pypi.company.local/simple/"
+
+[tool.vendor.packages.internal]
+my-build-tools = "^1.0.0"
+my-ui-elements = ">=2.0.0,<3.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

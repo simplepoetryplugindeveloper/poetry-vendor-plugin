@@ -19,6 +19,10 @@ This plugin adds `poetry vendor pull` — a command that downloads your configur
 poetry self add poetry-vendor-plugin
 ```
 
+## Example
+
+See the [`example/`](example/) directory for a complete, runnable project that configures one private PyPI server and two vendored packages.
+
 ## Usage
 
 ### 1. Configure vendor packages in your project
