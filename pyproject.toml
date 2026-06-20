@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "poetry-vendor-plugin"
-version = "0.2.1"
+version = "0.2.2"
 description = "Vendor internal packages from private PyPI for offline production deployments"
 authors = ["Jörg Koch simplepoetryplugindeveloper@proton.me"]
 readme = "README.md"
