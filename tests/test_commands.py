@@ -8,6 +8,7 @@ from poetry_vendor_plugin.commands import (
     _lock_file_path,
     _normalize_package_name,
     _parse_wheel_filename,
+    _pip_requirement,
     _read_lock,
     _target_wheel_path,
     _write_lock,
@@ -66,6 +67,24 @@ def test_parse_wheel_filename_invalid() -> None:
 
 def test_target_wheel_path(tmp_path: Path) -> None:
     assert _target_wheel_path(tmp_path, "my-build-tools") == tmp_path / "my_build_tools.whl"
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ("*", "six"),
+        ("", "six"),
+        ("^1.16.0", "six>=1.16.0,<2.0.0"),
+        ("^0.4.6", "six>=0.4.6,<0.5.0"),
+        ("~0.4.6", "six>=0.4.6,<0.5.0"),
+        (">=2.0.0,<3.0.0", "six>=2.0.0,<3.0.0"),
+        ("1.2.3", "six==1.2.3"),
+        ("==1.2.3", "six==1.2.3"),
+        ("!=1.2.3", "six!=1.2.3"),
+    ],
+)
+def test_pip_requirement(version: str, expected: str) -> None:
+    assert _pip_requirement("six", version) == expected
 
 
 def test_lock_file_roundtrip(tmp_path: Path) -> None:

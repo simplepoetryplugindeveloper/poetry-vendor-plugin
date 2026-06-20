@@ -12,6 +12,8 @@ from typing import Any
 
 from cleo.helpers import option
 from poetry.console.commands.command import Command
+from poetry.core.constraints.version.parser import parse_constraint
+from poetry.core.constraints.version.version import Version
 
 
 _LOCK_VERSION = 1
@@ -81,6 +83,28 @@ def _parse_wheel_filename(filename: str) -> tuple[str, str]:
 def _target_wheel_path(vendor_dir: Path, name: str) -> Path:
     """Return the stable, version-less path for a vendored wheel."""
     return vendor_dir / f"{_normalize_package_name(name)}.whl"
+
+
+def _pip_requirement(name: str, version: str) -> str:
+    """Convert a Poetry version specifier into a pip-compatible requirement.
+
+    Poetry supports caret (^), tilde (~), and other shorthand specifiers that
+    pip does not understand. We use Poetry's own parser to expand them to PEP 440
+    and fall back to the raw package name for the wildcard version.
+    """
+    if version in ("*", ""):
+        return name
+
+    constraint = parse_constraint(version)
+    constraint_str = str(constraint)
+
+    if constraint_str == "*":
+        return name
+
+    if isinstance(constraint, Version):
+        return f"{name}=={constraint_str}"
+
+    return f"{name}{constraint_str}"
 
 
 class VendorPullCommand(Command):
@@ -187,7 +211,7 @@ class VendorPullCommand(Command):
                         source,
                         "--dest",
                         tmp,
-                        f"{name}{version}",
+                        _pip_requirement(name, version),
                     ]
 
                     result = subprocess.run(
