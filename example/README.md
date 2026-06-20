@@ -8,7 +8,7 @@ To make the example runnable without setting up your own index, it uses the publ
 
 - Configuring one or more PyPI servers under `[tool.vendor.server]`.
 - Declaring which packages come from which server under `[tool.vendor.packages.<server>]`.
-- Using stable, version-less path dependencies in `[tool.poetry.dependencies]`.
+- Using path dependencies in `[tool.poetry.dependencies]` that point to the vendored wheels.
 
 ## Prerequisites
 
@@ -42,24 +42,27 @@ From this directory:
 poetry vendor pull
 ```
 
-This downloads wheels from TestPyPI into `vendor/` and creates `vendor.lock`:
+This downloads wheels from TestPyPI into `vendor/` with their original versioned filenames and creates `vendor.lock`:
 
 ```
 vendor/
-├── six.whl
-├── colorama.whl
+├── six-1.16.0-py2.py3-none-any.whl
+├── colorama-0.4.6-py2.py3-none-any.whl
 └── vendor.lock
 ```
 
-The wheel files use stable, version-less names, so the path dependencies in `pyproject.toml` do not need to change when versions are updated.
+`poetry vendor pull` automatically updates the path dependencies in `pyproject.toml` to match the downloaded wheel filenames.
 
-### 3. Install the project
+### 3. Lock and install
 
-Run this **after** vendoring, otherwise the path dependencies will fail because the wheels do not exist yet:
+After vendoring, regenerate the lock file so Poetry sees the updated path dependencies, then install:
 
 ```bash
+poetry lock
 poetry install
 ```
+
+The example sets `package-mode = false` in `pyproject.toml` so Poetry only installs dependencies, not a package.
 
 ### 4. Inspect or update vendored packages
 

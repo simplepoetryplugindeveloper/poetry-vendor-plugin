@@ -22,13 +22,13 @@ def test_list_reads_from_lock_file(
     make_command_io: Any,
     make_fake_wheel: Any,
 ) -> None:
-    make_fake_wheel(vendor_dir, "my_build_tools.whl")
+    make_fake_wheel(vendor_dir, "my_build_tools-1.2.0-py3-none-any.whl")
     lock = {
         "version": 1,
         "packages": {
             "my-build-tools": {
                 "version": "1.2.0",
-                "filename": "my_build_tools.whl",
+                "filename": "my_build_tools-1.2.0-py3-none-any.whl",
                 "source": "https://example.com/simple/",
                 "requested": "^1.0.0",
             }
@@ -50,14 +50,14 @@ def test_list_fallback_without_lock(
     make_command_io: Any,
     make_fake_wheel: Any,
 ) -> None:
-    make_fake_wheel(vendor_dir, "my_build_tools.whl")
+    make_fake_wheel(vendor_dir, "my_build_tools-1.2.0-py3-none-any.whl")
 
     command = _build_command(fake_poetry, make_command_io)
     result = command.handle()
 
     assert result == 0
     output = command._io.output.fetch()
-    assert "my_build_tools.whl" in output
+    assert "my_build_tools-1.2.0-py3-none-any.whl" in output
 
 
 def test_list_missing_vendor_dir(

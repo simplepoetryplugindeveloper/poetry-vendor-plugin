@@ -19,9 +19,33 @@ def vendor_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def fake_poetry(vendor_dir: Path) -> MagicMock:
+def fake_poetry(vendor_dir: Path, tmp_path: Path) -> MagicMock:
     """Return a mock Poetry object with a [tool.poetry-vendor] config."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[tool.poetry]
+name = "test-project"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+my-build-tools = { path = "vendor/my_build_tools-1.0.0-py3-none-any.whl" }
+
+[tool.vendor]
+vendor-dir = "vendor"
+
+[tool.vendor.server]
+internal = "https://example.com/simple/"
+
+[tool.vendor.packages.internal]
+my-build-tools = "^1.0.0"
+""",
+        encoding="utf-8",
+    )
+
     poetry: Any = MagicMock()
+    poetry.file.path = pyproject
     poetry.file.read.return_value = {
         "tool": {
             "vendor": {

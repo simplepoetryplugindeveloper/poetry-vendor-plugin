@@ -33,14 +33,16 @@ def _pip_download_mock(wheel_filename: str) -> Any:
     return _side_effect
 
 
-def _build_command(fake_poetry: MagicMock, make_command_io: Any, argv: list[str] | None = None) -> VendorPullCommand:
+def _build_command(
+    fake_poetry: MagicMock, make_command_io: Any, argv: list[str] | None = None
+) -> VendorPullCommand:
     command = VendorPullCommand()
     command._poetry = fake_poetry
     command._io = make_command_io(command, argv)
     return command
 
 
-def test_pull_downloads_and_renames_wheel(
+def test_pull_downloads_wheel(
     fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
 ) -> None:
     command = _build_command(fake_poetry, make_command_io)
@@ -52,12 +54,31 @@ def test_pull_downloads_and_renames_wheel(
         result = command.handle()
 
     assert result == 0
-    assert (vendor_dir / "my_build_tools.whl").exists()
+    assert (vendor_dir / "my_build_tools-1.2.0-py3-none-any.whl").exists()
     mock_run.assert_called_once()
 
     lock = json.loads((vendor_dir / "vendor.lock").read_text())
     assert lock["packages"]["my-build-tools"]["version"] == "1.2.0"
-    assert lock["packages"]["my-build-tools"]["filename"] == "my_build_tools.whl"
+    assert (
+        lock["packages"]["my-build-tools"]["filename"]
+        == "my_build_tools-1.2.0-py3-none-any.whl"
+    )
+
+
+def test_pull_updates_pyproject_paths(
+    fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
+) -> None:
+    command = _build_command(fake_poetry, make_command_io)
+
+    with patch(
+        "poetry_vendor_plugin.commands.subprocess.run",
+        side_effect=_pip_download_mock("my_build_tools-1.2.0-py3-none-any.whl"),
+    ):
+        result = command.handle()
+
+    assert result == 0
+    content = fake_poetry.file.path.read_text(encoding="utf-8")
+    assert 'path = "vendor/my_build_tools-1.2.0-py3-none-any.whl"' in content
 
 
 def test_pull_skips_existing_when_not_forced(
@@ -66,13 +87,13 @@ def test_pull_skips_existing_when_not_forced(
     make_command_io: Any,
     make_fake_wheel: Any,
 ) -> None:
-    make_fake_wheel(vendor_dir, "my_build_tools.whl")
+    make_fake_wheel(vendor_dir, "my_build_tools-1.2.0-py3-none-any.whl")
     lock = {
         "version": 1,
         "packages": {
             "my-build-tools": {
                 "version": "1.2.0",
-                "filename": "my_build_tools.whl",
+                "filename": "my_build_tools-1.2.0-py3-none-any.whl",
                 "source": "https://example.com/simple/",
                 "requested": "^1.0.0",
             }
@@ -95,13 +116,13 @@ def test_pull_force_redownloads(
     make_command_io: Any,
     make_fake_wheel: Any,
 ) -> None:
-    make_fake_wheel(vendor_dir, "my_build_tools.whl")
+    make_fake_wheel(vendor_dir, "my_build_tools-1.0.0-py3-none-any.whl")
     old_lock = {
         "version": 1,
         "packages": {
             "my-build-tools": {
-                "version": "0.9.0",
-                "filename": "my_build_tools.whl",
+                "version": "1.0.0",
+                "filename": "my_build_tools-1.0.0-py3-none-any.whl",
                 "source": "https://example.com/simple/",
                 "requested": "^1.0.0",
             }
@@ -118,6 +139,9 @@ def test_pull_force_redownloads(
         result = command.handle()
 
     assert result == 0
+    assert (vendor_dir / "my_build_tools-1.5.0-py3-none-any.whl").exists()
+    assert not (vendor_dir / "my_build_tools-1.0.0-py3-none-any.whl").exists()
+
     lock = json.loads((vendor_dir / "vendor.lock").read_text())
     assert lock["packages"]["my-build-tools"]["version"] == "1.5.0"
 
@@ -125,14 +149,16 @@ def test_pull_force_redownloads(
 def test_pull_dry_run(
     fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
 ) -> None:
-    command = _build_command(fake_poetry, make_command_io, argv=["poetry", "--dry-run"])
+    command = _build_command(
+        fake_poetry, make_command_io, argv=["poetry", "--dry-run"]
+    )
 
     with patch("poetry_vendor_plugin.commands.subprocess.run") as mock_run:
         result = command.handle()
 
     assert result == 0
     mock_run.assert_not_called()
-    assert not (vendor_dir / "my_build_tools.whl").exists()
+    assert not list(vendor_dir.glob("*.whl"))
     assert not (vendor_dir / "vendor.lock").exists()
 
 

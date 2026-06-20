@@ -4,12 +4,13 @@ version = "0.1.0"
 description = "Example project showing poetry-vendor-plugin usage"
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "^2.31"
-six = { path = "vendor/six.whl" }
-colorama = { path = "vendor/colorama.whl" }
+six = { path = "vendor/six-1.16.0-py2.py3-none-any.whl" }
+colorama = { path = "vendor/colorama-0.4.6-py2.py3-none-any.whl" }
 
 [tool.vendor]
 vendor-dir = "vendor"

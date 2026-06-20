@@ -55,28 +55,30 @@ my-ui-elements = ">=2.0.0,<3.0.0"
 poetry vendor pull
 ```
 
-This downloads wheels to `vendor/`:
+This downloads wheels to `vendor/` with their original versioned filenames:
 
 ```
 vendor/
-├── my_build_tools.whl
-├── my_ui_elements.whl
+├── my_build_tools-1.2.0-py3-none-any.whl
+├── my_ui_elements-2.1.0-py2.py3-none-any.whl
 └── vendor.lock
 ```
 
-The wheel files use stable, version-less names, and `vendor.lock` records the resolved versions. Commit both the wheels and the lock file.
+`vendor.lock` records the resolved version and the actual wheel filename. Commit both the wheels and the lock file.
 
 ### 3. Use path dependencies in production
 
-In your `pyproject.toml`, switch to path dependencies for production builds:
+In your `pyproject.toml`, add path dependencies for the vendored wheels:
 
 ```toml
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "^2.31"
-my-build-tools = { path = "vendor/my_build_tools.whl" }
-my-ui-elements = { path = "vendor/my_ui_elements.whl" }
+my-build-tools = { path = "vendor/my_build_tools-1.2.0-py3-none-any.whl" }
+my-ui-elements = { path = "vendor/my_ui_elements-2.1.0-py2.py3-none-any.whl" }
 ```
+
+After each `poetry vendor pull` or `poetry vendor update`, the plugin automatically updates these path dependencies to the current wheel filenames in `pyproject.toml`.
 
 ### 4. List vendored packages
 

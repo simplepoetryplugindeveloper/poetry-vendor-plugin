@@ -14,6 +14,8 @@ from cleo.helpers import option
 from poetry.console.commands.command import Command
 from poetry.core.constraints.version.parser import parse_constraint
 from poetry.core.constraints.version.version import Version
+from tomlkit import parse as parse_toml
+from tomlkit import dumps as dumps_toml
 
 
 _LOCK_VERSION = 1
@@ -80,11 +82,6 @@ def _parse_wheel_filename(filename: str) -> tuple[str, str]:
     return name, version
 
 
-def _target_wheel_path(vendor_dir: Path, name: str) -> Path:
-    """Return the stable, version-less path for a vendored wheel."""
-    return vendor_dir / f"{_normalize_package_name(name)}.whl"
-
-
 def _pip_requirement(name: str, version: str) -> str:
     """Convert a Poetry version specifier into a pip-compatible requirement.
 
@@ -105,6 +102,75 @@ def _pip_requirement(name: str, version: str) -> str:
         return f"{name}=={constraint_str}"
 
     return f"{name}{constraint_str}"
+
+
+def _dependency_name_key(name: str) -> str:
+    """Return a canonical key for comparing dependency/package names."""
+    return re.sub(r"[-_.]+", "", name).lower()
+
+
+def _find_dependency_key(dependencies: Any, name: str) -> str | None:
+    """Find the pyproject.toml dependency key matching a package name."""
+    target = _dependency_name_key(name)
+    for key in dependencies:
+        if _dependency_name_key(key) == target:
+            return key
+    return None
+
+
+def _update_pyproject_paths(poetry: Any, vendor_dir: Path, lock: dict[str, Any]) -> list[str]:
+    """Update path dependencies in pyproject.toml to current wheel filenames.
+
+    Returns the list of package names that were updated.
+    """
+    pyproject_path = poetry.file.path
+    project_dir = pyproject_path.parent
+    content = parse_toml(pyproject_path.read_text(encoding="utf-8"))
+    dependencies = (
+        content.get("tool", {}).get("poetry", {}).get("dependencies", {})
+    )
+
+    # Path dependencies are relative to the project root. Convert an absolute
+    # vendor directory back to a project-relative path for matching and writing.
+    if vendor_dir.is_absolute():
+        try:
+            vendor_prefix = vendor_dir.resolve().relative_to(
+                project_dir.resolve()
+            ).as_posix()
+        except ValueError:
+            vendor_prefix = vendor_dir.as_posix()
+    else:
+        vendor_prefix = vendor_dir.as_posix()
+
+    vendor_prefixes = (
+        f"{vendor_prefix}/",
+        f"{vendor_dir}/",
+    )
+
+    updated: list[str] = []
+
+    for name, info in lock.get("packages", {}).items():
+        filename = info.get("filename")
+        if not filename:
+            continue
+
+        dep_key = _find_dependency_key(dependencies, name)
+        if dep_key is None:
+            continue
+
+        dep = dependencies[dep_key]
+        if not isinstance(dep, dict):
+            continue
+
+        current_path = str(dep.get("path", ""))
+        if any(current_path.startswith(prefix) for prefix in vendor_prefixes):
+            dep["path"] = f"{vendor_prefix}/{filename}"
+            updated.append(dep_key)
+
+    if updated:
+        pyproject_path.write_text(dumps_toml(content), encoding="utf-8")
+
+    return updated
 
 
 class VendorPullCommand(Command):
@@ -166,35 +232,39 @@ class VendorPullCommand(Command):
                 continue
 
             normalized_name = _normalize_package_name(name)
-            target_path = _target_wheel_path(vendor_dir, name)
             locked_pkg = lock["packages"].get(name)
+            existing_wheel = (
+                vendor_dir / locked_pkg["filename"]
+                if locked_pkg and locked_pkg.get("filename")
+                else None
+            )
 
             self.line(f"<info>Processing {name}@{version}...</info>")
 
             if self.option("dry-run"):
                 self.line(
-                    f"  <comment>→ Would download from {source} and save as {target_path.name}</comment>"
+                    f"  <comment>→ Would download {name}@{version} from {source}</comment>"
                 )
                 success_count += 1
                 continue
 
             # Check if already vendored and not forced
-            if target_path.exists() and locked_pkg and not self.option("force"):
+            if (
+                existing_wheel
+                and existing_wheel.exists()
+                and locked_pkg
+                and not self.option("force")
+            ):
                 self.line(
                     f"  <info>✓ Already vendored: {name}=={locked_pkg['version']}</info>"
                 )
                 success_count += 1
                 continue
 
-            # Remove existing target wheel and any stale wheels for this package
-            if target_path.exists():
-                target_path.unlink()
-                self.line(f"  <comment>→ Removed old: {target_path.name}</comment>")
-
+            # Remove existing wheels for this package before re-downloading
             for stale in vendor_dir.glob(f"{normalized_name}*.whl"):
-                if stale.resolve() != target_path.resolve():
-                    stale.unlink()
-                    self.line(f"  <comment>→ Removed stale: {stale.name}</comment>")
+                stale.unlink()
+                self.line(f"  <comment>→ Removed old: {stale.name}</comment>")
 
             # Download using pip into a temporary directory inside vendor/
             try:
@@ -231,6 +301,7 @@ class VendorPullCommand(Command):
 
                     wheel = downloaded[0]
                     parsed_name, parsed_version = _parse_wheel_filename(wheel.name)
+                    target_path = vendor_dir / wheel.name
                     wheel.rename(target_path)
 
                     lock["packages"][name] = {
@@ -260,14 +331,23 @@ class VendorPullCommand(Command):
             f"<info>Done: {success_count} succeeded, {fail_count} failed</info>"
         )
 
-        if success_count > 0 and not self.option("dry-run"):
-            self.line("")
-            self.line(
-                "<comment>Remember to update your pyproject.toml dependencies to use path references:</comment>"
-            )
-            self.line(
-                '  <comment>my-package = { path = "vendor/my_package.whl" }</comment>'
-            )
+        if success_count > 0 and not self.option("dry-run") and fail_count == 0:
+            updated = _update_pyproject_paths(poetry, vendor_dir, lock)
+            if updated:
+                self.line("")
+                self.line(
+                    "<comment>Updated path dependencies in pyproject.toml for:</comment>"
+                )
+                for dep in updated:
+                    self.line(f"  <comment>• {dep}</comment>")
+            else:
+                self.line("")
+                self.line(
+                    "<comment>Remember to update your pyproject.toml dependencies to use path references:</comment>"
+                )
+                self.line(
+                    '  <comment>my-package = { path = "vendor/my_package-1.0.0-py3-none-any.whl" }</comment>'
+                )
 
         return 0 if fail_count == 0 else 1
 
@@ -323,12 +403,12 @@ class VendorPullCommand(Command):
                     "package names to version specifiers"
                 )
 
-            for pkg_name, version in server_packages.items():
+            for pkg_name, pkg_version in server_packages.items():
                 expanded.append(
                     {
                         "name": pkg_name,
                         "source": source,
-                        "version": str(version),
+                        "version": str(pkg_version),
                     }
                 )
 
@@ -381,13 +461,9 @@ class VendorListCommand(Command):
             for name, info in sorted(locked_packages.items()):
                 filename = info.get("filename")
                 version = info.get("version", "unknown")
-                wheel_path = (
-                    vendor_dir / filename
-                    if filename
-                    else _target_wheel_path(vendor_dir, name)
-                )
+                wheel_path = vendor_dir / filename if filename else None
 
-                if wheel_path.exists():
+                if wheel_path and wheel_path.exists():
                     size = wheel_path.stat().st_size
                     if size < 1024 * 1024:
                         size_str = f"{size / 1024:.1f} KB"

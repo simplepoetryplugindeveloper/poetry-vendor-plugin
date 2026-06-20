@@ -1,2 +1,0 @@
-# Ignore downloaded wheels, but keep the lock file.
-*.whl
