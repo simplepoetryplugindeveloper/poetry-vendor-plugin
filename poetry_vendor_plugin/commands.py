@@ -2,14 +2,85 @@
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from cleo.commands.command import Command
 from cleo.helpers import option
-from poetry.factory import Factory
+
+
+_LOCK_VERSION = 1
+_LOCK_FILENAME = "vendor.lock"
+
+
+def _normalize_package_name(name: str) -> str:
+    """Normalize a package name for use in a wheel filename.
+
+    Wheel distribution names use underscores and are lower-cased.
+    """
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
+def _lock_file_path(vendor_dir: Path) -> Path:
+    """Return the path to the vendor lock file."""
+    return vendor_dir / _LOCK_FILENAME
+
+
+def _read_lock(vendor_dir: Path) -> dict[str, Any]:
+    """Read the vendor lock file, returning a fresh structure if missing."""
+    lock_path = _lock_file_path(vendor_dir)
+    if not lock_path.exists():
+        return {"version": _LOCK_VERSION, "packages": {}}
+
+    try:
+        with lock_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {"version": _LOCK_VERSION, "packages": {}}
+
+    if not isinstance(data, dict):
+        return {"version": _LOCK_VERSION, "packages": {}}
+
+    data.setdefault("version", _LOCK_VERSION)
+    data.setdefault("packages", {})
+    return data
+
+
+def _write_lock(vendor_dir: Path, lock: dict[str, Any]) -> None:
+    """Write the vendor lock file."""
+    lock_path = _lock_file_path(vendor_dir)
+    with lock_path.open("w", encoding="utf-8") as f:
+        json.dump(lock, f, indent=2)
+        f.write("\n")
+
+
+def _parse_wheel_filename(filename: str) -> tuple[str, str]:
+    """Return (normalized_package_name, version) from a wheel filename.
+
+    Wheel filenames follow the format:
+        {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
+    The version is always the second hyphen-separated segment.
+    """
+    if not filename.endswith(".whl"):
+        raise ValueError(f"Not a wheel filename: {filename}")
+
+    parts = filename[:-4].split("-")
+    if len(parts) < 5:
+        raise ValueError(f"Invalid wheel filename: {filename}")
+
+    name = _normalize_package_name(parts[0])
+    version = parts[1]
+    return name, version
+
+
+def _target_wheel_path(vendor_dir: Path, name: str) -> Path:
+    """Return the stable, version-less path for a vendored wheel."""
+    return vendor_dir / f"{_normalize_package_name(name)}.whl"
 
 
 class VendorPullCommand(Command):
@@ -41,6 +112,9 @@ class VendorPullCommand(Command):
             self.line("<comment>No vendor packages configured.</comment>")
             return 0
 
+        lock = _read_lock(vendor_dir)
+        lock["packages"] = dict(lock.get("packages", {}))
+
         self.line(f"<info>Vendor directory: {vendor_dir.resolve()}</info>")
         self.line("")
 
@@ -54,61 +128,90 @@ class VendorPullCommand(Command):
 
             if not name or not source:
                 self.line_error(
-                    f"<error>  ✗ Invalid config: missing name or source</error>"
+                    "<error>  ✗ Invalid config: missing name or source</error>"
                 )
                 fail_count += 1
                 continue
 
+            normalized_name = _normalize_package_name(name)
+            target_path = _target_wheel_path(vendor_dir, name)
+            locked_pkg = lock["packages"].get(name)
+
             self.line(f"<info>Processing {name}@{version}...</info>")
 
             if self.option("dry-run"):
-                self.line(f"  <comment>→ Would download from {source}</comment>")
+                self.line(
+                    f"  <comment>→ Would download from {source} and save as {target_path.name}</comment>"
+                )
                 success_count += 1
                 continue
 
             # Check if already vendored and not forced
-            existing = list(vendor_dir.glob(f"{name.replace('-', '_')}*.whl"))
-            if existing and not self.option("force"):
-                self.line(f"  <info>✓ Already vendored: {existing[0].name}</info>")
+            if target_path.exists() and locked_pkg and not self.option("force"):
+                self.line(
+                    f"  <info>✓ Already vendored: {name}=={locked_pkg['version']}</info>"
+                )
                 success_count += 1
                 continue
 
-            # Remove old versions if updating
-            for old in vendor_dir.glob(f"{name.replace('-', '_')}*.whl"):
-                old.unlink()
-                self.line(f"  <comment>→ Removed old: {old.name}</comment>")
+            # Remove existing target wheel and any stale wheels for this package
+            if target_path.exists():
+                target_path.unlink()
+                self.line(f"  <comment>→ Removed old: {target_path.name}</comment>")
 
-            # Download using pip
+            for stale in vendor_dir.glob(f"{normalized_name}*.whl"):
+                if stale.resolve() != target_path.resolve():
+                    stale.unlink()
+                    self.line(f"  <comment>→ Removed stale: {stale.name}</comment>")
+
+            # Download using pip into a temporary directory inside vendor/
             try:
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "download",
-                    "--no-deps",
-                    "--only-binary",
-                    ":all:",
-                    "--index-url",
-                    source,
-                    "--dest",
-                    str(vendor_dir),
-                    f"{name}{version}",
-                ]
+                with tempfile.TemporaryDirectory(dir=str(vendor_dir)) as tmp:
+                    cmd = [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "download",
+                        "--no-deps",
+                        "--only-binary",
+                        ":all:",
+                        "--index-url",
+                        source,
+                        "--dest",
+                        tmp,
+                        f"{name}{version}",
+                    ]
 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
 
-                downloaded = list(vendor_dir.glob(f"{name.replace('-', '_')}*.whl"))
-                if downloaded:
-                    self.line(f"  <info>✓ Downloaded: {downloaded[-1].name}</info>")
+                    downloaded = list(Path(tmp).glob("*.whl"))
+                    if not downloaded:
+                        self.line_error(
+                            "<error>  ✗ Download failed - no wheel found</error>"
+                        )
+                        fail_count += 1
+                        continue
+
+                    wheel = downloaded[0]
+                    parsed_name, parsed_version = _parse_wheel_filename(wheel.name)
+                    wheel.rename(target_path)
+
+                    lock["packages"][name] = {
+                        "version": parsed_version,
+                        "filename": target_path.name,
+                        "source": source,
+                        "requested": version,
+                    }
+
+                    self.line(
+                        f"  <info>✓ Downloaded: {name}=={parsed_version} -> {target_path.name}</info>"
+                    )
                     success_count += 1
-                else:
-                    self.line_error(f"<error>  ✗ Download failed - no wheel found</error>")
-                    fail_count += 1
 
             except subprocess.CalledProcessError as e:
                 self.line_error(f"<error>  ✗ Download failed: {e.stderr}</error>")
@@ -116,6 +219,9 @@ class VendorPullCommand(Command):
             except Exception as e:
                 self.line_error(f"<error>  ✗ Error: {e}</error>")
                 fail_count += 1
+
+        if not self.option("dry-run"):
+            _write_lock(vendor_dir, lock)
 
         self.line("")
         self.line(
@@ -128,7 +234,7 @@ class VendorPullCommand(Command):
                 "<comment>Remember to update your pyproject.toml dependencies to use path references:</comment>"
             )
             self.line(
-                '  <comment>my-package = { path = "vendor/my_package-1.0.0-py3-none-any.whl" }</comment>'
+                '  <comment>my-package = { path = "vendor/my_package.whl" }</comment>'
             )
 
         return 0 if fail_count == 0 else 1
@@ -175,6 +281,35 @@ class VendorListCommand(Command):
             )
             return 0
 
+        lock = _read_lock(vendor_dir)
+        locked_packages = lock.get("packages", {})
+
+        if locked_packages:
+            self.line("<info>Vendored packages:</info>")
+            for name, info in sorted(locked_packages.items()):
+                filename = info.get("filename")
+                version = info.get("version", "unknown")
+                wheel_path = (
+                    vendor_dir / filename
+                    if filename
+                    else _target_wheel_path(vendor_dir, name)
+                )
+
+                if wheel_path.exists():
+                    size = wheel_path.stat().st_size
+                    if size < 1024 * 1024:
+                        size_str = f"{size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size / (1024 * 1024):.1f} MB"
+                else:
+                    size_str = "missing"
+
+                self.line(
+                    f"  <info>•</info> {name}=={version} ({filename}) <comment>({size_str})</comment>"
+                )
+            return 0
+
+        # Fallback for vendor directories without a lock file
         wheels = list(vendor_dir.glob("*.whl"))
         if not wheels:
             self.line("<comment>No vendored packages found.</comment>")
@@ -190,4 +325,3 @@ class VendorListCommand(Command):
             self.line(f"  <info>•</info> {wheel.name} <comment>({size_str})</comment>")
 
         return 0
-

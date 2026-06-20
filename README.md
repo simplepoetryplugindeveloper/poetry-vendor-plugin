@@ -50,9 +50,12 @@ This downloads wheels to `vendor/`:
 
 ```
 vendor/
-├── my_build_tools-1.2.0-py3-none-any.whl
-└── my_ui_elements-2.1.0-py3-none-any.whl
+├── my_build_tools.whl
+├── my_ui_elements.whl
+└── vendor.lock
 ```
+
+The wheel files use stable, version-less names, and `vendor.lock` records the resolved versions. Commit both the wheels and the lock file.
 
 ### 3. Use path dependencies in production
 
@@ -62,8 +65,8 @@ In your `pyproject.toml`, switch to path dependencies for production builds:
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "^2.31"
-my-build-tools = { path = "vendor/my_build_tools-1.2.0-py3-none-any.whl" }
-my-ui-elements = { path = "vendor/my_ui_elements-2.1.0-py3-none-any.whl" }
+my-build-tools = { path = "vendor/my_build_tools.whl" }
+my-ui-elements = { path = "vendor/my_ui_elements.whl" }
 ```
 
 ### 4. List vendored packages
@@ -100,6 +103,10 @@ name = "package-name"     # Package name on PyPI
 source = "https://..."    # Private PyPI index URL
 version = "^1.0.0"        # Version specifier (any PEP 440 specifier)
 ```
+
+## Lock File
+
+After running `poetry vendor pull`, a `<vendor-dir>/vendor.lock` file is created. It tracks the resolved version, source, and requested version specifier for each package. Commit this file alongside the wheels so that `poetry vendor list` can show accurate version information and so updates behave predictably across machines.
 
 ## Requirements
 
