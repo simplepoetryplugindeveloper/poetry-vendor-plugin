@@ -11,7 +11,7 @@ from poetry_vendor_plugin.commands import VendorListCommand
 
 def _build_command(fake_poetry: MagicMock, make_command_io: Any) -> VendorListCommand:
     command = VendorListCommand()
-    command.poetry = fake_poetry
+    command._poetry = fake_poetry
     command._io = make_command_io(command)
     return command
 

@@ -35,7 +35,7 @@ def _pip_download_mock(wheel_filename: str) -> Any:
 
 def _build_command(fake_poetry: MagicMock, make_command_io: Any, argv: list[str] | None = None) -> VendorPullCommand:
     command = VendorPullCommand()
-    command.poetry = fake_poetry
+    command._poetry = fake_poetry
     command._io = make_command_io(command, argv)
     return command
 

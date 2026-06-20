@@ -10,8 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from cleo.commands.command import Command
 from cleo.helpers import option
+from poetry.console.commands.command import Command
 
 
 _LOCK_VERSION = 1
