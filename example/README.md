@@ -28,6 +28,18 @@ poetry self add poetry-vendor-plugin
 poetry self add ../
 ```
 
+### HTTP / internal indexes
+
+If your private PyPI server uses plain HTTP (not HTTPS), pip will refuse to use it by default. Add the host to `trusted-hosts` in `pyproject.toml`:
+
+```toml
+[tool.vendor]
+trusted-hosts = ["internal-pypi.local"]
+
+[tool.vendor.server]
+internal = "http://internal-pypi.local/simple/"
+```
+
 Verify it is loaded:
 
 ```bash

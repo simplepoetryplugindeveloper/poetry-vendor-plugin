@@ -8,10 +8,12 @@ import pytest
 from poetry_vendor_plugin.commands import (
     _dependency_name_key,
     _find_dependency_key,
+    _host_from_url,
     _lock_file_path,
     _normalize_package_name,
     _parse_wheel_filename,
     _pip_requirement,
+    _pip_trusted_host_args,
     _read_lock,
     _update_pyproject_paths,
     _write_lock,
@@ -96,6 +98,26 @@ def test_find_dependency_key(tmp_path: Path) -> None:
     assert _find_dependency_key(dependencies, "my-build-tools") == "my-build-tools"
     assert _find_dependency_key(dependencies, "my_build_tools") == "my-build-tools"
     assert _find_dependency_key(dependencies, "missing") is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://internal-pypi.local/simple/", "internal-pypi.local"),
+        ("http://internal-pypi.local:8080/simple/", "internal-pypi.local:8080"),
+        ("https://pypi.org/simple/", "pypi.org"),
+    ],
+)
+def test_host_from_url(url: str, expected: str) -> None:
+    assert _host_from_url(url) == expected
+
+
+def test_pip_trusted_host_args() -> None:
+    assert _pip_trusted_host_args(
+        "http://internal-pypi.local/simple/", ["internal-pypi.local"]
+    ) == ["--trusted-host", "internal-pypi.local"]
+    assert _pip_trusted_host_args("https://pypi.org/simple/", ["internal-pypi.local"]) == []
+    assert _pip_trusted_host_args("http://internal-pypi.local/simple/", []) == []
 
 
 def test_update_pyproject_paths(tmp_path: Path) -> None:

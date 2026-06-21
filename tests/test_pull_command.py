@@ -226,3 +226,36 @@ def test_pull_invalid_package_config(
 
     assert result == 1
     mock_run.assert_not_called()
+
+
+def test_pull_uses_trusted_host(
+    fake_poetry: MagicMock, vendor_dir: Path, make_command_io: Any
+) -> None:
+    fake_poetry.file.read.return_value = {
+        "tool": {
+            "vendor": {
+                "vendor-dir": str(vendor_dir),
+                "trusted-hosts": ["internal-pypi.local"],
+                "server": {
+                    "internal": "http://internal-pypi.local/simple/",
+                },
+                "packages": {
+                    "internal": {
+                        "my-build-tools": "^1.0.0",
+                    }
+                },
+            }
+        }
+    }
+    command = _build_command(fake_poetry, make_command_io)
+
+    with patch(
+        "poetry_vendor_plugin.commands.subprocess.run",
+        side_effect=_pip_download_mock("my_build_tools-1.2.0-py3-none-any.whl"),
+    ) as mock_run:
+        result = command.handle()
+
+    assert result == 0
+    call_args = mock_run.call_args
+    assert "--trusted-host" in call_args.args[0]
+    assert "internal-pypi.local" in call_args.args[0]

@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from cleo.helpers import option
 from poetry.console.commands.command import Command
@@ -109,6 +110,21 @@ def _dependency_name_key(name: str) -> str:
     return re.sub(r"[-_.]+", "", name).lower()
 
 
+def _host_from_url(url: str) -> str:
+    """Return the host (with port) from a URL."""
+    return urlparse(url).netloc or url
+
+
+def _pip_trusted_host_args(
+    source: str, trusted_hosts: list[str]
+) -> list[str]:
+    """Return --trusted-host args for pip when the source host is listed."""
+    host = _host_from_url(source)
+    if host in trusted_hosts:
+        return ["--trusted-host", host]
+    return []
+
+
 def _find_dependency_key(dependencies: Any, name: str) -> str | None:
     """Find the pyproject.toml dependency key matching a package name."""
     target = _dependency_name_key(name)
@@ -200,6 +216,13 @@ class VendorPullCommand(Command):
         vendor_dir = Path(vendor_config.get("vendor-dir", "vendor"))
         vendor_dir.mkdir(exist_ok=True)
 
+        trusted_hosts = vendor_config.get("trusted-hosts", [])
+        if not isinstance(trusted_hosts, list):
+            self.line_error(
+                "<error>[tool.vendor] trusted-hosts must be a list of hostnames</error>"
+            )
+            return 1
+
         try:
             packages = self._expand_packages(vendor_config)
         except ValueError as e:
@@ -277,6 +300,7 @@ class VendorPullCommand(Command):
                         "--no-deps",
                         "--only-binary",
                         ":all:",
+                        *_pip_trusted_host_args(source, trusted_hosts),
                         "--index-url",
                         source,
                         "--dest",

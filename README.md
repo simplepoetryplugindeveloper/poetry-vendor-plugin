@@ -109,6 +109,10 @@ poetry vendor update -p my-build-tools  # Update specific package
 [tool.vendor]
 vendor-dir = "vendor"  # Directory for vendored wheels (default: "vendor")
 
+# Optional: list hosts that should be trusted when using plain HTTP indexes.
+# Pip ignores HTTP indexes by default unless the host is marked as trusted.
+trusted-hosts = ["internal-pypi.local"]
+
 [tool.vendor.server]
 server1 = "https://..."  # Named private PyPI index URL
 
