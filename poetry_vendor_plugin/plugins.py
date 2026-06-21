@@ -3,7 +3,13 @@
 from poetry.console.application import Application
 from poetry.plugins.application_plugin import ApplicationPlugin
 
-from poetry_vendor_plugin.commands import VendorListCommand, VendorPullCommand, VendorUpdateCommand
+from poetry_vendor_plugin.commands import (
+    VendorAddCommand,
+    VendorAddServerCommand,
+    VendorListCommand,
+    VendorPullCommand,
+    VendorUpdateCommand,
+)
 
 
 class VendorPlugin(ApplicationPlugin):
@@ -19,4 +25,9 @@ class VendorPlugin(ApplicationPlugin):
         application.command_loader.register_factory(
             "vendor list", lambda: VendorListCommand()
         )
-
+        application.command_loader.register_factory(
+            "vendor add-server", lambda: VendorAddServerCommand()
+        )
+        application.command_loader.register_factory(
+            "vendor add", lambda: VendorAddCommand()
+        )

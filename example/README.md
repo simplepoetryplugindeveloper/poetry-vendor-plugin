@@ -28,22 +28,31 @@ poetry self add poetry-vendor-plugin
 poetry self add ../
 ```
 
-### HTTP / internal indexes
-
-If your private PyPI server uses plain HTTP (not HTTPS), pip will refuse to use it by default. Add the host to `trusted-hosts` in `pyproject.toml`:
-
-```toml
-[tool.vendor]
-trusted-hosts = ["internal-pypi.local"]
-
-[tool.vendor.server]
-internal = "http://internal-pypi.local/simple/"
-```
-
 Verify it is loaded:
 
 ```bash
 poetry self show plugins
+```
+
+### 2. Configure servers and packages
+
+You can edit `pyproject.toml` directly, or use the convenience commands:
+
+```bash
+# Register the TestPyPI server
+poetry vendor add-server https://test.pypi.org/simple/ testpypi
+
+# Add packages from that server
+poetry vendor add six --server testpypi --version "^1.16.0"
+poetry vendor add colorama --server testpypi --version "^0.4.6"
+```
+
+### HTTP / internal indexes
+
+If your private PyPI server uses plain HTTP (not HTTPS), pip will refuse to use it by default. Register the server with `--trusted`:
+
+```bash
+poetry vendor add-server http://192.168.1.10/simple/ internal --trusted
 ```
 
 ### 2. Vendor the packages
@@ -108,4 +117,4 @@ git add vendor/
 git commit -m "Vendor internal packages"
 ```
 
-The included `vendor/.gitignore` ignores downloaded wheels by default, so you must explicitly `git add` the files you want to commit.
+The included `.gitignore` ignores downloaded wheels by default, so you must explicitly `git add` the files you want to commit.

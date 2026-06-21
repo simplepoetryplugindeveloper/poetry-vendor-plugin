@@ -11,12 +11,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from cleo.helpers import option
+from cleo.helpers import argument, option
 from poetry.console.commands.command import Command
 from poetry.core.constraints.version.parser import parse_constraint
 from poetry.core.constraints.version.version import Version
-from tomlkit import parse as parse_toml
 from tomlkit import dumps as dumps_toml
+from tomlkit import inline_table
+from tomlkit import parse as parse_toml
 
 
 _LOCK_VERSION = 1
@@ -115,9 +116,7 @@ def _host_from_url(url: str) -> str:
     return urlparse(url).netloc or url
 
 
-def _pip_trusted_host_args(
-    source: str, trusted_hosts: list[str]
-) -> list[str]:
+def _pip_trusted_host_args(source: str, trusted_hosts: list[str]) -> list[str]:
     """Return --trusted-host args for pip when the source host is listed."""
     host = _host_from_url(source)
     if host in trusted_hosts:
@@ -134,7 +133,71 @@ def _find_dependency_key(dependencies: Any, name: str) -> str | None:
     return None
 
 
-def _update_pyproject_paths(poetry: Any, vendor_dir: Path, lock: dict[str, Any]) -> list[str]:
+def _vendor_prefix(vendor_dir: Path, project_dir: Path) -> str:
+    """Return the project-relative vendor directory prefix."""
+    if vendor_dir.is_absolute():
+        try:
+            return vendor_dir.resolve().relative_to(project_dir.resolve()).as_posix()
+        except ValueError:
+            return vendor_dir.as_posix()
+    return vendor_dir.as_posix()
+
+
+def _download_wheel(
+    name: str,
+    version: str,
+    source: str,
+    vendor_dir: Path,
+    trusted_hosts: list[str],
+) -> tuple[Path, str]:
+    """Download a wheel and return (target_path, parsed_version).
+
+    Any existing wheels for the same package are removed first.
+    Raises subprocess.CalledProcessError or RuntimeError on failure.
+    """
+    normalized_name = _normalize_package_name(name)
+
+    for stale in vendor_dir.glob(f"{normalized_name}*.whl"):
+        stale.unlink()
+
+    with tempfile.TemporaryDirectory(dir=str(vendor_dir)) as tmp:
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            "--no-deps",
+            "--only-binary",
+            ":all:",
+            *_pip_trusted_host_args(source, trusted_hosts),
+            "--index-url",
+            source,
+            "--dest",
+            tmp,
+            _pip_requirement(name, version),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        downloaded = list(Path(tmp).glob("*.whl"))
+        if not downloaded:
+            raise RuntimeError("No wheel found")
+
+        wheel = downloaded[0]
+        _, parsed_version = _parse_wheel_filename(wheel.name)
+        target_path = vendor_dir / wheel.name
+        wheel.rename(target_path)
+        return target_path, parsed_version
+
+
+def _update_pyproject_paths(
+    poetry: Any, vendor_dir: Path, lock: dict[str, Any]
+) -> list[str]:
     """Update path dependencies in pyproject.toml to current wheel filenames.
 
     Returns the list of package names that were updated.
@@ -146,20 +209,9 @@ def _update_pyproject_paths(poetry: Any, vendor_dir: Path, lock: dict[str, Any])
         content.get("tool", {}).get("poetry", {}).get("dependencies", {})
     )
 
-    # Path dependencies are relative to the project root. Convert an absolute
-    # vendor directory back to a project-relative path for matching and writing.
-    if vendor_dir.is_absolute():
-        try:
-            vendor_prefix = vendor_dir.resolve().relative_to(
-                project_dir.resolve()
-            ).as_posix()
-        except ValueError:
-            vendor_prefix = vendor_dir.as_posix()
-    else:
-        vendor_prefix = vendor_dir.as_posix()
-
+    vendor_prefix_str = _vendor_prefix(vendor_dir, project_dir)
     vendor_prefixes = (
-        f"{vendor_prefix}/",
+        f"{vendor_prefix_str}/",
         f"{vendor_dir}/",
     )
 
@@ -180,13 +232,23 @@ def _update_pyproject_paths(poetry: Any, vendor_dir: Path, lock: dict[str, Any])
 
         current_path = str(dep.get("path", ""))
         if any(current_path.startswith(prefix) for prefix in vendor_prefixes):
-            dep["path"] = f"{vendor_prefix}/{filename}"
+            dep["path"] = f"{vendor_prefix_str}/{filename}"
             updated.append(dep_key)
 
     if updated:
         pyproject_path.write_text(dumps_toml(content), encoding="utf-8")
 
     return updated
+
+
+def _ensure_table(content: Any, *keys: str) -> Any:
+    """Ensure a nested table exists in a tomlkit document, creating tables as needed."""
+    current = content
+    for key in keys:
+        if key not in current:
+            current[key] = {}
+        current = current[key]
+    return current
 
 
 class VendorPullCommand(Command):
@@ -254,7 +316,6 @@ class VendorPullCommand(Command):
                 fail_count += 1
                 continue
 
-            normalized_name = _normalize_package_name(name)
             locked_pkg = lock["packages"].get(name)
             existing_wheel = (
                 vendor_dir / locked_pkg["filename"]
@@ -284,62 +345,20 @@ class VendorPullCommand(Command):
                 success_count += 1
                 continue
 
-            # Remove existing wheels for this package before re-downloading
-            for stale in vendor_dir.glob(f"{normalized_name}*.whl"):
-                stale.unlink()
-                self.line(f"  <comment>→ Removed old: {stale.name}</comment>")
-
-            # Download using pip into a temporary directory inside vendor/
             try:
-                with tempfile.TemporaryDirectory(dir=str(vendor_dir)) as tmp:
-                    cmd = [
-                        sys.executable,
-                        "-m",
-                        "pip",
-                        "download",
-                        "--no-deps",
-                        "--only-binary",
-                        ":all:",
-                        *_pip_trusted_host_args(source, trusted_hosts),
-                        "--index-url",
-                        source,
-                        "--dest",
-                        tmp,
-                        _pip_requirement(name, version),
-                    ]
-
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
-
-                    downloaded = list(Path(tmp).glob("*.whl"))
-                    if not downloaded:
-                        self.line_error(
-                            "<error>  ✗ Download failed - no wheel found</error>"
-                        )
-                        fail_count += 1
-                        continue
-
-                    wheel = downloaded[0]
-                    parsed_name, parsed_version = _parse_wheel_filename(wheel.name)
-                    target_path = vendor_dir / wheel.name
-                    wheel.rename(target_path)
-
-                    lock["packages"][name] = {
-                        "version": parsed_version,
-                        "filename": target_path.name,
-                        "source": source,
-                        "requested": version,
-                    }
-
-                    self.line(
-                        f"  <info>✓ Downloaded: {name}=={parsed_version} -> {target_path.name}</info>"
-                    )
-                    success_count += 1
-
+                target_path, parsed_version = _download_wheel(
+                    name, version, source, vendor_dir, trusted_hosts
+                )
+                lock["packages"][name] = {
+                    "version": parsed_version,
+                    "filename": target_path.name,
+                    "source": source,
+                    "requested": version,
+                }
+                self.line(
+                    f"  <info>✓ Downloaded: {name}=={parsed_version} -> {target_path.name}</info>"
+                )
+                success_count += 1
             except subprocess.CalledProcessError as e:
                 self.line_error(f"<error>  ✗ Download failed: {e.stderr}</error>")
                 fail_count += 1
@@ -531,3 +550,176 @@ class VendorListCommand(Command):
             return None
 
         return tool.get("vendor", {})
+
+
+class VendorAddServerCommand(Command):
+    """Register a vendor PyPI server in pyproject.toml."""
+
+    name = "vendor add-server"
+    description = "Add a vendor PyPI server to pyproject.toml"
+
+    arguments = [
+        argument("url", "Server URL"),
+        argument("name", "Server name"),
+    ]
+
+    options = [
+        option("trusted", "t", "Trust this host for plain HTTP indexes.", flag=True),
+        option("force", "f", "Overwrite an existing server entry.", flag=True),
+    ]
+
+    def handle(self) -> int:
+        url = self.argument("url")
+        name = self.argument("name")
+
+        if not url or not name:
+            self.line_error("<error>Usage: poetry vendor add-server <url> <name></error>")
+            return 1
+
+        pyproject_path = self.poetry.file.path
+        content = parse_toml(pyproject_path.read_text(encoding="utf-8"))
+
+        vendor_table = _ensure_table(content, "tool", "vendor")
+        servers = _ensure_table(vendor_table, "server")
+
+        if name in servers and not self.option("force"):
+            self.line_error(
+                f"<error>Server '{name}' already exists. Use --force to overwrite.</error>"
+            )
+            return 1
+
+        servers[name] = url
+
+        if self.option("trusted"):
+            trusted_hosts = vendor_table.get("trusted-hosts", [])
+            if not isinstance(trusted_hosts, list):
+                trusted_hosts = []
+            host = _host_from_url(url)
+            if host not in trusted_hosts:
+                trusted_hosts.append(host)
+            vendor_table["trusted-hosts"] = trusted_hosts
+
+        pyproject_path.write_text(dumps_toml(content), encoding="utf-8")
+
+        self.line(f"<info>Added server '{name}' = {url}</info>")
+        if self.option("trusted"):
+            self.line(
+                f"<comment>Added {_host_from_url(url)} to trusted-hosts</comment>"
+            )
+
+        return 0
+
+
+class VendorAddCommand(Command):
+    """Add a package to the vendor configuration and download it."""
+
+    name = "vendor add"
+    description = "Add a package to vendor config, download it, and add a path dependency"
+
+    arguments = [
+        argument("package", "Package name"),
+    ]
+
+    options = [
+        option("server", "s", "Server to use", flag=False),
+        option("version", None, "Version specifier", flag=False),
+        option("force", "f", "Overwrite an existing package entry.", flag=True),
+    ]
+
+    def handle(self) -> int:
+        package = self.argument("package")
+        server_name = self.option("server")
+        version = self.option("version") or "*"
+
+        if not package:
+            self.line_error("<error>Usage: poetry vendor add <package> --server <server></error>")
+            return 1
+
+        if not server_name:
+            self.line_error("<error>--server is required</error>")
+            return 1
+
+        poetry = self.poetry
+        vendor_config = poetry.file.read().get("tool", {}).get("vendor", {})
+        servers = vendor_config.get("server", {})
+        source = servers.get(server_name)
+
+        if source is None:
+            self.line_error(
+                f"<error>Unknown server '{server_name}'. Add it with 'poetry vendor add-server <url> {server_name}'</error>"
+            )
+            return 1
+
+        vendor_dir = Path(vendor_config.get("vendor-dir", "vendor"))
+        vendor_dir.mkdir(exist_ok=True)
+
+        trusted_hosts = vendor_config.get("trusted-hosts", [])
+        if not isinstance(trusted_hosts, list):
+            trusted_hosts = []
+
+        packages_table = vendor_config.get("packages", {})
+        server_packages = packages_table.get(server_name, {})
+        if package in server_packages and not self.option("force"):
+            self.line_error(
+                f"<error>Package '{package}' already configured for server '{server_name}'. Use --force to overwrite.</error>"
+            )
+            return 1
+
+        self.line(f"<info>Downloading {package}@{version} from {server_name}...</info>")
+
+        try:
+            target_path, parsed_version = _download_wheel(
+                package, version, source, vendor_dir, trusted_hosts
+            )
+        except subprocess.CalledProcessError as e:
+            self.line_error(f"<error>Download failed: {e.stderr}</error>")
+            return 1
+        except Exception as e:
+            self.line_error(f"<error>Error: {e}</error>")
+            return 1
+
+        # Update pyproject.toml
+        pyproject_path = poetry.file.path
+        project_dir = pyproject_path.parent
+        content = parse_toml(pyproject_path.read_text(encoding="utf-8"))
+
+        vendor_table = _ensure_table(content, "tool", "vendor")
+        packages = _ensure_table(vendor_table, "packages")
+        server_pkg_table = _ensure_table(packages, server_name)
+        server_pkg_table[package] = version
+
+        # Add/update path dependency
+        dependencies = _ensure_table(content, "tool", "poetry", "dependencies")
+        dep_key = _find_dependency_key(dependencies, package)
+        if dep_key is None:
+            dep_key = package
+
+        dep = dependencies.get(dep_key)
+        if not isinstance(dep, dict):
+            dep = inline_table()
+            dependencies[dep_key] = dep
+
+        vendor_prefix_str = _vendor_prefix(vendor_dir, project_dir)
+        dep["path"] = f"{vendor_prefix_str}/{target_path.name}"
+
+        pyproject_path.write_text(dumps_toml(content), encoding="utf-8")
+
+        # Update lock file
+        lock = _read_lock(vendor_dir)
+        lock["packages"] = dict(lock.get("packages", {}))
+        lock["packages"][package] = {
+            "version": parsed_version,
+            "filename": target_path.name,
+            "source": source,
+            "requested": version,
+        }
+        _write_lock(vendor_dir, lock)
+
+        self.line(
+            f"<info>Added {package}=={parsed_version} from {server_name}</info>"
+        )
+        self.line(
+            f"<comment>Updated pyproject.toml and vendor.lock. Run 'poetry lock' if needed.</comment>"
+        )
+
+        return 0
