@@ -45,7 +45,7 @@ poetry vendor add-server https://internal-pypi.company.local/simple/ internal
 poetry vendor add-server http://192.168.1.10/simple/ internal --trusted
 
 # Add a package from that server
-poetry vendor add my-build-tools --server internal --version "^1.0.0"
+poetry vendor add my-build-tools --server internal --constraint "^1.0.0"
 ```
 
 The equivalent manual configuration looks like this:
@@ -113,7 +113,7 @@ poetry vendor update -p my-build-tools  # Update specific package
 | `poetry vendor add-server <url> <name>` | Register a PyPI server in `pyproject.toml` |
 | `poetry vendor add-server <url> <name> --trusted` | Register a server and mark its host as trusted |
 | `poetry vendor add <package> --server <name>` | Add a package, download it, and add a path dependency |
-| `poetry vendor add <package> --server <name> --version <spec>` | Add a package with a specific version specifier |
+| `poetry vendor add <package> --server <name> --constraint <spec>` | Add a package with a specific version specifier |
 | `poetry vendor pull` | Download vendor packages to `vendor/` |
 | `poetry vendor pull --force` | Re-download even if already present |
 | `poetry vendor pull --dry-run` | Preview what would be downloaded |

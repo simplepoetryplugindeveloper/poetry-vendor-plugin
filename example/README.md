@@ -43,8 +43,8 @@ You can edit `pyproject.toml` directly, or use the convenience commands:
 poetry vendor add-server https://test.pypi.org/simple/ testpypi
 
 # Add packages from that server
-poetry vendor add six --server testpypi --version "^1.16.0"
-poetry vendor add colorama --server testpypi --version "^0.4.6"
+poetry vendor add six --server testpypi --constraint "^1.16.0"
+poetry vendor add colorama --server testpypi --constraint "^0.4.6"
 ```
 
 ### HTTP / internal indexes

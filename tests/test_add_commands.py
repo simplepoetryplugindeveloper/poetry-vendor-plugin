@@ -129,7 +129,7 @@ def test_add_package_downloads_and_updates_config(
             "another-package",
             "--server",
             "internal",
-            "--version",
+            "--constraint",
             "^1.0.0",
         ],
     )

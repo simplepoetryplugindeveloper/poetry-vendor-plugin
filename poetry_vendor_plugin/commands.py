@@ -622,14 +622,14 @@ class VendorAddCommand(Command):
 
     options = [
         option("server", "s", "Server to use", flag=False),
-        option("version", None, "Version specifier", flag=False),
+        option("constraint", "c", "Version constraint/specifier", flag=False),
         option("force", "f", "Overwrite an existing package entry.", flag=True),
     ]
 
     def handle(self) -> int:
         package = self.argument("package")
         server_name = self.option("server")
-        version = self.option("version") or "*"
+        version = self.option("constraint") or "*"
 
         if not package:
             self.line_error("<error>Usage: poetry vendor add <package> --server <server></error>")
